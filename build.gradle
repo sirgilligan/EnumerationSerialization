@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '2.7.0'
+}
+
+group 'org.example'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+apply plugin: 'java-library'
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+ext {
+    commons_lang3_version = '3.12.0'
+    jacksonCoreVersion = '2.13.3'
+    logback_classic_version = '1.2.11'
+    springBootVersion = '2.7.0'
+    springFrameworkVersion = '5.3.20'
+
+}
+
+dependencies {
+    implementation("org.springframework:spring-core:${springFrameworkVersion}")
+    implementation("com.fasterxml.jackson.core:jackson-annotations:${jacksonCoreVersion}")
+    implementation("com.fasterxml.jackson.core:jackson-core:${jacksonCoreVersion}")
+    implementation("com.fasterxml.jackson.core:jackson-databind:${jacksonCoreVersion}")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-xml:${jacksonCoreVersion}")
+    implementation("org.apache.commons:commons-lang3:${commons_lang3_version}")
+
+    testImplementation('org.testng:testng:7.6.1')
+}
+
+test {
+    useTestNG()
+}
