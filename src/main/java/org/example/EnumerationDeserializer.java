@@ -40,22 +40,21 @@ public class EnumerationDeserializer<T extends Enum<T>> extends StdDeserializer<
 	public JsonDeserializer<?> createContextual(DeserializationContext ctxt, BeanProperty property) throws JsonMappingException
 	{
 
-		//enumClass is not null if the constructor that takes the class as a param
-		//is used to create this object.
-		if (null != enumClass) {
-			classAnnotation = enumClass.getAnnotation(EnumJson.class);
-		}
-
 		if (null != property) {
+			//This enum is a bean or a member variable.
 			fieldAnnotation = property.getAnnotation(EnumJson.class);
 
-			if ((null == classAnnotation) && (null == enumClass)) {
-				classAnnotation = property.getType().getRawClass().getAnnotation(EnumJson.class);
-
-				if ((null != classAnnotation) && (classAnnotation.deserializationClass().isEnum())) {
-					this.enumClass = (Class<T>) classAnnotation.deserializationClass();
-				}
+			//enumClass could have been set in a constructor.
+			if (null == enumClass) {
+				enumClass = (Class<T>) property.getType().getRawClass();
 			}
+		}
+		else {
+			enumClass = (Class<T>) ctxt.getContextualType().getRawClass();
+		}
+
+		if (null != enumClass) {
+			classAnnotation = enumClass.getAnnotation(EnumJson.class);
 		}
 
 		return this;
