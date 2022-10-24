@@ -49,7 +49,9 @@ public class EnumerationDeserializer<T extends Enum<T>> extends StdDeserializer<
 				enumClass = (Class<T>) property.getType().getRawClass();
 			}
 		}
-		else {
+
+		if (null == enumClass) {
+			//enum class wasn't set in constructor and the property was null.
 			enumClass = (Class<T>) ctxt.getContextualType().getRawClass();
 		}
 
