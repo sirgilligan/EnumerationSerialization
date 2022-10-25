@@ -29,6 +29,7 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 {
 
 	private static final long serialVersionUID = 1L;
+	private transient EnumJson classAnnotation = null;
 
 	public EnumerationSerializer()
 	{
@@ -48,6 +49,14 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 
 		//Looking for data to write as json
 		String dataToWrite = null;
+
+		//Get the class annotation
+		try {
+			classAnnotation = value.getClass().getAnnotation(EnumJson.class);
+		}
+		catch (Exception ignored) {
+			//Ignored
+		}
 
 		//Looking for a specific annotation
 		//Field annotation has priority over class annotation
@@ -71,13 +80,7 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 		if (null == enumJsonAnnotation) {
 			//There wasn't a field level annotation
 			//Is there an annotation on the enum class?
-
-			try {
-				enumJsonAnnotation = value.getClass().getAnnotation(EnumJson.class);
-			}
-			catch (Exception ignored) {
-				//ignored
-			}
+			enumJsonAnnotation = classAnnotation;
 		}
 
 		ObjectMapper mapper = (ObjectMapper) gen.getCodec();
@@ -96,9 +99,12 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 
 				case ALIAS: {
 					Field[] enumFields = value.getClass().getDeclaredFields();
-					Field field = findAnnotatedField(enumFields, Projection.ALIAS);
+					Field field = findClassAnnotation(enumFields, Projection.ALIAS, (Class<T>) value.getClass());
 					if (null == field) {
-						field = findFieldByName(Projection.ALIAS.name().toLowerCase(), (Class<T>) value.getClass());
+						field = findAnnotatedField(enumFields, Projection.ALIAS);
+						if (null == field) {
+							field = findFieldByName(Projection.ALIAS.name().toLowerCase(), (Class<T>) value.getClass());
+						}
 					}
 					dataToWrite = getData(field, value, mapper);
 				}
@@ -106,9 +112,12 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 
 				case VALUE: {
 					Field[] enumFields = value.getClass().getDeclaredFields();
-					Field field = findAnnotatedField(enumFields, Projection.VALUE);
+					Field field = findClassAnnotation(enumFields, Projection.VALUE, (Class<T>) value.getClass());
 					if (null == field) {
-						field = findFieldByName(Projection.VALUE.name().toLowerCase(), (Class<T>) value.getClass());
+						field = findAnnotatedField(enumFields, Projection.VALUE);
+						if (null == field) {
+							field = findFieldByName(Projection.VALUE.name().toLowerCase(), (Class<T>) value.getClass());
+						}
 					}
 					dataToWrite = getData(field, value, mapper);
 				}
@@ -127,6 +136,28 @@ public class EnumerationSerializer<T extends Enum<T>> extends StdSerializer<Enum
 		if (null != dataToWrite) {
 			gen.writeRawValue(dataToWrite);
 		}
+	}
+
+	private Field findClassAnnotation(Field[] enumFields, Projection projection, Class<T> enumClass)
+	{
+		String fieldName = null;
+		Field result = null;
+
+		if (null != classAnnotation) {
+			if ((projection.equals(Projection.VALUE)) && (!"".equals(classAnnotation.deserializationValueFieldName()))) {
+				fieldName = classAnnotation.deserializationValueFieldName();
+			}
+			else if ((projection.equals(Projection.ALIAS)) && (!"".equals(classAnnotation.deserializationAliasFieldName()))) {
+				fieldName = classAnnotation.deserializationAliasFieldName();
+			}
+		}
+
+		if (null != fieldName) {
+			result = findFieldByName(fieldName, enumClass);
+		}
+
+		return result;
+
 	}
 
 	protected Field findAnnotatedField(Field[] enumFields, EnumJson.Projection projection)

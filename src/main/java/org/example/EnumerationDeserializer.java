@@ -6,6 +6,7 @@
 package org.example;
 
 import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.databind.BeanProperty;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
@@ -69,12 +70,21 @@ public class EnumerationDeserializer<T extends Enum<T>> extends StdDeserializer<
 			3) If the enum has an annotation for an EnumJson Projection = VALUE
 			4) If the json string matches the enum.ordinal
 	 -------------------------------------------------------------------------------------------*/
+	@java.lang.SuppressWarnings("java:S3011")
 	@Override
 	public Enum<T> deserialize(JsonParser p, DeserializationContext ctxt) throws IOException
 	{
 
 		Enum<T> result = null;
-		final String jsonValue = p.getText();
+		String jsonValue = p.getText();
+
+		if ((null == p.getParsingContext().getParent()) && (p.getCurrentToken().equals(JsonToken.VALUE_STRING))) {
+			//This is the root context. That means the data could be in nested double quotes.
+			char[] chars = jsonValue.toCharArray();
+			if ((chars[0] == '"') && (chars[chars.length - 1] == '"')) {
+				jsonValue = jsonValue.substring(1, chars.length - 1);
+			}
+		}
 
 		boolean caseInsensitive = false;
 
@@ -85,110 +95,181 @@ public class EnumerationDeserializer<T extends Enum<T>> extends StdDeserializer<
 			caseInsensitive = classAnnotation.deserializeCaseInsensitive();
 		}
 
+		boolean isDigit = isDigit(jsonValue);
+
+		Field[] enumFields = enumClass.getDeclaredFields();
+
 		//-------------------------------------------------------------------------------------------
-		//Check if json matches the Name
-		for (final T enumValue : enumClass.getEnumConstants()) {
-			if (enumValue.name().equals(jsonValue) || ((caseInsensitive) && enumValue.name().equalsIgnoreCase(jsonValue))) {
-				result = enumValue;
+		// Find the alias and value field just once.
+		Field valueField = null;
+		Field aliasField = null;
+
+		if (null != classAnnotation) {
+			if (!"".equals(classAnnotation.deserializationValueFieldName())) {
+				valueField = getDeclaredField(classAnnotation.deserializationValueFieldName());
+			}
+
+			if (!"".equals(classAnnotation.deserializationAliasFieldName())) {
+				aliasField = getDeclaredField(classAnnotation.deserializationAliasFieldName());
 			}
 		}
 
-		//-------------------------------------------------------------------------------------------
-		//Check if the enum has an EnumJson Projection Annotation of ALIAS
-		if (null == result) {
-			Field[] enumFields = enumClass.getDeclaredFields();
-			result = enumByAnnotatedField(enumFields, Projection.ALIAS, jsonValue, caseInsensitive);
-		}
-
-		//-------------------------------------------------------------------------------------------
-		//Check if the enum has an EnumJson Projection Annotation of VALUE
-		if (null == result) {
-			Field[] enumFields = enumClass.getDeclaredFields();
-			result = enumByAnnotatedField(enumFields, Projection.VALUE, jsonValue, caseInsensitive);
-		}
-
-		//-------------------------------------------------------------------------------------------
-		//Check if json matches the Ordinal
-		if (null == result) {
-			for (final T enumValue : enumClass.getEnumConstants()) {
-				if (Integer.toString(enumValue.ordinal()).equals(jsonValue)) {
-					result = enumValue;
+		if ((null == valueField) || (null == aliasField)) {
+			for (Field f : enumFields) {
+				EnumJson annie = f.getAnnotation(EnumJson.class);
+				if (null != annie) {
+					if ((null == aliasField) && (annie.serializeProjection() == Projection.ALIAS)) {
+						aliasField = f;
+					}
+					else if ((null != valueField) && (annie.serializeProjection() == Projection.VALUE)) {
+						valueField = f;
+					}
+				}
+				if ((null != aliasField) && (null != valueField)) {
+					break;
 				}
 			}
 		}
 
-		return result;
-	}
+		if (null == aliasField) {
+			//Look for field by field name, not by annotation
+			aliasField = getDeclaredField(Projection.ALIAS.name().toLowerCase());
+		}
 
-	@java.lang.SuppressWarnings("java:S3011")
-	protected Enum<T> enumByAnnotatedField(Field[] enumFields, EnumJson.Projection projection, String jsonValue, boolean caseInsensitive)
-	{
+		if (null == valueField) {
+			//Look for field by field name, not by annotation
+			valueField = getDeclaredField(Projection.VALUE.name().toLowerCase());
+		}
 
-		Enum<T> result = null;
-
-		Field valueField = null;
-		for (Field f : enumFields) {
-			EnumJson annie = f.getAnnotation(EnumJson.class);
-			if ((null != annie) && (annie.serializeProjection() == projection)) {
-				valueField = f;
-				break;
-			}
+		if (null != aliasField) {
+			aliasField.setAccessible(true);
 		}
 
 		if (null != valueField) {
-			//The enum has a EnumJson Projection that matches
 			valueField.setAccessible(true);
-			try {
-				for (final T enumValue : enumClass.getEnumConstants()) {
+		}
 
-					//Get the projected value from the enum.
-					Object projectedValue = valueField.get(enumValue);
+		//-------------------------------------------------------------------------------------------
 
-					if ((null != projectedValue) &&
-					    ((projectedValue.toString().equals(jsonValue)) ||
-					     ((caseInsensitive) && projectedValue.toString().equalsIgnoreCase(jsonValue)))) {
-						result = enumValue;
-					}
+		//-------------------------------------------------------------------------------------------
+		//Loop to go through the enum values only one time.
+		for (final T enumValue : enumClass.getEnumConstants()) {
+
+			//-------------------------------------------------------------------------------------------
+			//Check if json matches the Name
+			if ((!isDigit) && (enumValue.name().equals(jsonValue) || ((caseInsensitive) && enumValue.name().equalsIgnoreCase(jsonValue)))) {
+				result = enumValue;
+				break;
+			}
+
+			//-------------------------------------------------------------------------------------------
+			//Check if the enum has an EnumJson Projection Annotation of ALIAS
+			if ((null != aliasField) && ((!isDigit) || (fieldCanDeserializeDigit(aliasField)))) {
+				Object valueOfField = getFieldValue(aliasField, enumValue);
+				if ((null != valueOfField) &&
+				    ((valueOfField.toString().equals(jsonValue)) ||
+				     ((caseInsensitive) && valueOfField.toString().equalsIgnoreCase(jsonValue)))) {
+					result = enumValue;
+					break;
 				}
 			}
-			catch (IllegalAccessException ignored) {
-				//ignored
-			}
-		}
-		else {
-			//Look for a field by named value or alias.
-			if (projection == Projection.VALUE) {
-				result = getFromKnownField(Projection.VALUE.name().toLowerCase(), jsonValue, caseInsensitive);
-			}
-			else if (projection == Projection.ALIAS) {
-				result = getFromKnownField(Projection.ALIAS.name().toLowerCase(), jsonValue, caseInsensitive);
-			}
 
-		}
-
-		return result;
-	}
-
-	protected Enum<T> getFromKnownField(String fieldName, String jsonValue, boolean caseInsensitive)
-	{
-		Enum<T> result = null;
-
-		try {
-			Field knownField = enumClass.getDeclaredField(fieldName);
-			for (final T enumValue : enumClass.getEnumConstants()) {
-				Object value = knownField.get(enumValue);
-
-				if ((null != value) &&
-				    ((value.toString().equals(jsonValue)) || ((caseInsensitive) && value.toString().equalsIgnoreCase(jsonValue)))) {
+			//-------------------------------------------------------------------------------------------
+			//Check if the enum has an EnumJson Projection Annotation of VALUE
+			if ((null != valueField) && ((!isDigit) || (fieldCanDeserializeDigit(valueField)))) {
+				Object valueOfField = getFieldValue(valueField, enumValue);
+				if ((null != valueOfField) &&
+				    ((valueOfField.toString().equals(jsonValue)) ||
+				     ((caseInsensitive) && valueOfField.toString().equalsIgnoreCase(jsonValue)))) {
 					result = enumValue;
 					break;
 				}
 			}
 		}
-		catch (NoSuchFieldException | IllegalAccessException ignored) {
-			//ignored
+
+		//-------------------------------------------------------------------------------------------
+		//Check if json matches the Ordinal
+		//This can't be checked in the previous loop over the enum constants
+		//because there could be a conflict with value or alias being a digit
+		if ((isDigit) && (null == result)) {
+			int index = parseInt(jsonValue, -1);
+			if ((index >= 0) && (index < enumClass.getEnumConstants().length)) {
+				result = enumClass.getEnumConstants()[index];
+			}
 		}
 
+		return result;
+	}
+
+	protected int parseInt(String s, int defaultResult)
+	{
+		int result = defaultResult;
+
+		try {
+			result = Integer.parseInt(s);
+		}
+		catch (NumberFormatException ignored) {
+			//Ignored
+		}
+
+		return result;
+	}
+
+	protected Field getDeclaredField(String fieldName)
+	{
+		Field result = null;
+
+		try {
+			result = enumClass.getDeclaredField(fieldName);
+		}
+		catch (NoSuchFieldException ignored) {
+			//Ignored
+		}
+
+		return result;
+	}
+
+	protected Object getFieldValue(Field field, T enumValue)
+	{
+		Object result = null;
+
+		try {
+			result = field.get(enumValue);
+		}
+		catch (IllegalAccessException ignored) {
+			//Ignored
+		}
+
+		return result;
+
+	}
+
+	protected boolean isDigit(String value)
+	{
+		boolean result = true;
+
+		final char[] chars = value.toCharArray();
+		for (Character c : chars) {
+			if (c < '0' || c > '9') {
+				result = false;
+				break;
+			}
+		}
+
+		return result;
+	}
+
+	protected boolean fieldCanDeserializeDigit(Field field)
+	{
+		boolean result = false;
+		Class<?> valueFieldType = field.getType();
+		if ((String.class.equals(valueFieldType)) ||
+		    (int.class.equals(valueFieldType)) ||
+		    (long.class.equals(valueFieldType)) ||
+		    (Integer.class.equals(valueFieldType)) ||
+		    (Long.class.equals(valueFieldType))) {
+			result = true;
+		}
 		return result;
 	}
 }

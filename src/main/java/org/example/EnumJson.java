@@ -28,4 +28,8 @@ public @interface EnumJson
 	boolean deserializeCaseInsensitive() default false;
 
 	Class<?> deserializationClass() default Void.class;
+
+	String deserializationValueFieldName() default "";
+
+	String deserializationAliasFieldName() default "";
 }
